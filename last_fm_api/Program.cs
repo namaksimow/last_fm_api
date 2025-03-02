@@ -13,151 +13,112 @@ class Program
         
         GeniusClient client = new(accessToken);
         
-        string track = "Disease";
-        string artist = "Beartooth";
+        string track = "alone";
+        string artist = "i prevail";
 
-        await GetTrackJson(track, artist, apiKey);
-        await GetLyrics(client, track, artist);
-        await GetArtistTagsFromLastFm(artist, apiKey);
-        await GetTrackTagsFromLastFM(apiKey, artist, track);
+        /*var lyrics = await GetLyrics(client, track, artist);*/
+        var artistTags = await GetArtistTags(artist, apiKey);
+        var trackTags = await GetTrackTags(apiKey, artist, track);
+        var tags = await  DefineTrackTags(trackTags, artistTags);
+
+        if (tags != null)
+        {
+            foreach (var tag in tags)
+            {
+                Console.WriteLine(tag);
+            }    
+        }
+        else
+        {
+            Console.WriteLine("No tags found");
+        }
+        
+        
     }
 
-    static async Task GetLyrics(GeniusClient client, string track, string artist) 
-    {
-        try
+    static async Task<List<JToken>> DefineTrackTags(List<JToken>? trackTags, List<JToken>? artistTags)
+    {        
+        if (trackTags == null && artistTags == null)
         {
-            GeniusTrackInfo? trackInfo = await client.GetTrackInfoAsync(track, artist);
+            return null;
+        }
 
-            if (trackInfo != null)
-            {
-                string lyrics = trackInfo.Lyrics ?? "Текст не найден.";
-                Console.WriteLine(lyrics);
-            }
-            else
-            {
-                Console.WriteLine("Трек не найден.");
-            }
-        }
-        catch (Exception ex)
+        if (trackTags == null)
         {
-            Console.WriteLine($"Ошибка: {ex.Message}");
+            return artistTags;
         }
+        
+        if (artistTags != null)
+        {
+            List<JToken> tags = artistTags.Intersect(trackTags).ToList();
+            return tags;
+        }
+
+        return null;
     }
     
-    static async Task GetTrackTagsFromLastFM(string apiKey, string artist, string track)
+    static async Task<string> GetLyrics(GeniusClient client, string track, string artist) 
+    {
+        GeniusTrackInfo? trackInfo = await client.GetTrackInfoAsync(track, artist);
+
+        if (trackInfo != null)
+        {
+            string? lyrics = trackInfo.Lyrics;
+            return lyrics;
+        }
+        
+        return null;
+    }
+    
+    static async Task<List<JToken>> GetTrackTags(string apiKey, string artist, string track)
     {
         using HttpClient client = new HttpClient();
         
-        // Формируем URL запроса
         string url = $"http://ws.audioscrobbler.com/2.0/?method=track.gettoptags&artist={Uri.EscapeDataString(artist)}&track={Uri.EscapeDataString(track)}&api_key={apiKey}&format=json";
 
-        try
-        {
-            HttpResponseMessage response = await client.GetAsync(url);
-            response.EnsureSuccessStatusCode();
+        HttpResponseMessage response = await client.GetAsync(url);
+        response.EnsureSuccessStatusCode();
 
-            string json = await response.Content.ReadAsStringAsync();
-            JObject parsedJson = JObject.Parse(json);
-
-            // Извлекаем теги (жанры) трека
-            var tags = parsedJson["toptags"]?["tag"];
-            if (tags != null && tags.HasValues)
-            {
-                Console.WriteLine($"Теги (жанры) трека \"{track}\" ({artist}):");
-                foreach (var tag in tags)
-                {
-                    Console.WriteLine($"  - {tag["name"]}");
-                }
-            }
-            else
-            {
-                Console.WriteLine("Жанры не найдены.");
-            }
-        }
-        catch (Exception ex)
+        string json = await response.Content.ReadAsStringAsync();
+        JObject parsedJson = JObject.Parse(json);
+            
+        var tags = parsedJson["toptags"]?["tag"];
+        if (tags != null && tags.HasValues)
         {
-            Console.WriteLine($"Ошибка: {ex.Message}");
+            var popularTags = tags
+                .Where(tag => (int?)tag["count"] >= 50)
+                .Select(tag => tag["name"])
+                .ToList();
+                
+            return popularTags;   
         }
+        
+        return null;
     }
     
-    static async Task GetArtistTagsFromLastFm(string artist, string apiKey)
+    static async Task<List<JToken>> GetArtistTags(string artist, string apiKey)
     {
         using HttpClient client = new HttpClient();
 
         string url = $"https://ws.audioscrobbler.com/2.0/?method=artist.getTopTags&artist={Uri.EscapeDataString(artist)}&api_key={apiKey}&format=json";
 
-        try
-        {
-            HttpResponseMessage response = await client.GetAsync(url);
-            response.EnsureSuccessStatusCode();
+        HttpResponseMessage response = await client.GetAsync(url);
+        response.EnsureSuccessStatusCode();
 
-            string json = await response.Content.ReadAsStringAsync();
-            JObject parsedJson = JObject.Parse(json);
-            
-            JToken? tags = parsedJson["toptags"]?["tag"];
-            if (tags != null && tags.HasValues)
-            {
-                Console.WriteLine($"Теги для артиста {artist}:");
-                foreach (var tag in tags)
-                {
-                    Console.WriteLine($"  - {tag["name"]}");
-                }
-            }
-            else
-            {
-                Console.WriteLine($"Теги для артиста {artist} не найдены.");
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Ошибка: {ex.Message}");
-        }
-    }
-    
-    static async Task GetTrackJson(string track, string artist, string apiKey)
-    {
-        using HttpClient client = new HttpClient();
+        string json = await response.Content.ReadAsStringAsync();
+        JObject parsedJson = JObject.Parse(json);
         
-        string url = $"http://ws.audioscrobbler.com/2.0/?method=track.getInfo&api_key={apiKey}&artist={Uri.EscapeDataString(artist)}&track={Uri.EscapeDataString(track)}&format=json";
+        JToken? tags = parsedJson["toptags"]?["tag"];
+        if (tags != null && tags.HasValues)
+        {
+            var popularTags = tags
+                .Where(tag => (int?)tag["count"] >= 50)
+                .Select(tag => tag["name"])
+                .ToList();
 
-        try
-        {
-            HttpResponseMessage response = await client.GetAsync(url);
-            response.EnsureSuccessStatusCode();
-            
-            string json = await response.Content.ReadAsStringAsync();
-            
-            JObject jsonParsed = JObject.Parse(json);
-            
-            PrintJson(jsonParsed, "");
-
+            return popularTags;
         }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Ошибка: {ex.Message}");
-        }
-    }
-
-    static void PrintJson(JToken token, string indent)
-    {
-        if (token is JObject obj)
-        {
-            foreach (var property in obj.Properties())
-            {
-                Console.WriteLine($"{indent}{property.Name}:");
-                PrintJson(property.Value, indent + "  ");
-            }
-        }
-        else if (token is JArray array)
-        {
-            foreach (var item in array)
-            {
-                PrintJson(item, indent + "  ");
-            }
-        }
-        else
-        {
-            Console.WriteLine($"{indent}{token}");
-        }
+        
+        return null;
     }
 }
